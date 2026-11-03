@@ -1,0 +1,92 @@
+#!/usr/bin/python3
+import sys
+import time
+import http.client
+from pathlib import Path
+
+IP = "172.31.67.40"
+PORT = 8080
+OUT = Path.home() / "lab17" / "results.log"
+
+def request(path="/resource"):
+    conn = http.client.HTTPConnection(IP, PORT, timeout=5)
+    try:
+        conn.request("GET", path)
+        response = conn.getresponse()
+        status = response.status
+        headers = dict(response.getheaders())
+        body = response.read().decode()
+        return status, headers, body
+    finally:
+        conn.close()
+
+def passed(message):
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    with OUT.open("a") as f:
+        f.write(message + "\n")
+    print(message)
+
+def check(mode):
+    if mode == "health":
+        status, headers, body = request("/health")
+        assert status == 200
+        assert "LAB17_SERVER_HEALTHY" in body
+        passed("LAB17_HEALTH_PASS")
+
+    elif mode == "normal":
+        status, headers, body = request()
+        assert status == 200
+        assert "LAB17_REQUEST_OK" in body
+        passed("LAB17_NORMAL_PASS")
+
+    elif mode == "headers":
+        status, headers, body = request()
+        assert status == 200
+        assert headers.get("X-RateLimit-Limit") == "5"
+        assert 0 <= int(headers["X-RateLimit-Remaining"]) <= 4
+        passed("LAB17_HEADERS_PASS")
+
+    elif mode == "burst":
+        statuses = [request()[0] for _ in range(8)]
+        assert 429 in statuses
+        passed("LAB17_BURST_429_PASS")
+
+    elif mode == "retry":
+        found = False
+        for _ in range(8):
+            status, headers, body = request()
+            if status == 429:
+                retry = int(headers["Retry-After"])
+                assert 1 <= retry <= 10
+                found = True
+                break
+        assert found
+        passed("LAB17_RETRY_AFTER_PASS")
+
+    elif mode == "recover":
+        blocked = False
+        for _ in range(8):
+            status, headers, body = request()
+            if status == 429:
+                blocked = True
+                break
+        assert blocked
+        print("Waiting 11 seconds for rate-limit recovery...")
+        time.sleep(11)
+        status, headers, body = request()
+        assert status == 200
+        assert "LAB17_REQUEST_OK" in body
+        passed("LAB17_RECOVERY_PASS")
+
+    else:
+        raise ValueError("Unknown mode: " + mode)
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: lab17-check health|normal|headers|burst|retry|recover")
+        sys.exit(2)
+    try:
+        check(sys.argv[1])
+    except Exception as e:
+        print("LAB17_CHECK_FAIL:", str(e))
+        sys.exit(1)

@@ -1,0 +1,13 @@
+[Unit]
+Description=LAB17 HTTP Rate Limiting Server
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+ExecStart=/usr/bin/python3 /usr/local/bin/lab17-rate-server
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
